@@ -29,3 +29,5 @@ services:
         expose:
             - '9092'
             - '29092'
+        depends_on:
+            - zookeeper
