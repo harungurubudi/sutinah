@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/linkedin/goavro"
 )
@@ -19,20 +20,19 @@ func TestProduceConsume(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := make(chan error)
 
-	go produce(ctx, expected, err)
-	if <-err != nil {
+	consume(ctx, expected, t)
+	err := produce(ctx, expected, t)
+	if err != nil {
 		t.Error(err)
 	}
 }
 
-func produce(ctx context.Context, data map[string]interface{}, e chan error) {
+func produce(ctx context.Context, data map[string]interface{}, t *testing.T) error {
 	config := getConfig()
 	codec, err := goavro.NewCodec(getRecordCodecSchema())
 	if err != nil {
-		e <- err
-		return
+		return err
 	}
 
 	producer := NewProducer(
@@ -41,13 +41,45 @@ func produce(ctx context.Context, data map[string]interface{}, e chan error) {
 		codec,
 	)
 
+	time.Sleep(5 * time.Second)
 	err = producer.Produce(ctx, data["id"].(string), data)
 	if err != nil {
-		e <- err
-		return
+		return err
 	}
 	producer.Close()
-	close(e)
+	return nil
+}
+
+func consume(ctx context.Context, expected map[string]interface{}, t *testing.T) {
+	m := make(chan *ConsumerChannel)
+	config := getConfig()
+	codec, err := goavro.NewCodec(getRecordCodecSchema())
+	if err != nil {
+		t.Error(err)
+	}
+
+	consumer := NewConsumer(
+		config["kafka_address"].(string),
+		"user",
+		codec,
+	)
+
+	go consumer.Consume(ctx, m)
+	result := <-m
+	if result.Err != nil {
+		t.Error(result.Err)
+	}
+
+	var passed bool = true
+	for k, v := range result.Message.(map[string]interface{}) {
+		if v != expected[k] {
+			passed = false
+		}
+	}
+	if !passed {
+		t.Error("Expected consumed object is invalid")
+	}
+
 }
 
 func getRecordCodecSchema() string {
